@@ -5,6 +5,11 @@ import os
 # Telegram Bot Token (BotFather se lo)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "your-telegram-bot-token")
 
+API_ID = os.getenv("API_ID", "your-telegram-api-id")
+
+API_HASH = os.getenv("API_HASH", "your-telegram-api-hash")
+
+
 # Owner ka Telegram user ID (sirf wahi /getapi use kar payega)
 OWNER_ID = int(os.getenv("OWNER_ID", "123456789"))
 
