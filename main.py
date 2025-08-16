@@ -1,14 +1,13 @@
 import os
 import re
-import asyncio
-from typing import List, Optional
+from typing import Optional, List
 
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Telegram bot (optional, if env set)
+# Telegram bot (optional; runs only if env set)
 from pyrogram import Client, filters
 
 APP_NAME = os.getenv("APP_NAME", "YouTube API Bot")
@@ -18,9 +17,9 @@ API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# ---------- yt-dlp helpers ----------
+# ---------------- yt-dlp helpers ----------------
 
-def _best_audio_info(url: str):
+def _best_audio_info(url: str) -> dict:
     opts = {
         "format": "bestaudio/best",
         "quiet": True,
@@ -32,16 +31,13 @@ def _best_audio_info(url: str):
         info = ydl.extract_info(url, download=False)
     if not info:
         raise ValueError("Failed to fetch info")
-    # When single video, info is dict; playlists produce 'entries'
     if "entries" in info and isinstance(info["entries"], list):
         info = next((e for e in info["entries"] if e), None)
         if not info:
             raise ValueError("No entries found")
     return info
 
-
-def _shape_info(info: dict):
-    # Choose thumbnail
+def _shape_info(info: dict) -> dict:
     thumb = info.get("thumbnail")
     if not thumb and isinstance(info.get("thumbnails"), list) and info["thumbnails"]:
         thumb = info["thumbnails"][-1].get("url")
@@ -51,21 +47,17 @@ def _shape_info(info: dict):
         "duration": info.get("duration"),
         "thumbnail": thumb,
         "webpage_url": info.get("webpage_url") or info.get("original_url"),
-        "direct_url": info.get("url"),  # bestaudio/best direct stream URL
+        "direct_url": info.get("url"),
         "uploader": info.get("uploader"),
         "channel_id": info.get("channel_id"),
         "view_count": info.get("view_count"),
         "live_status": info.get("live_status"),
     }
 
+def fetch_info(url: str) -> dict:
+    return _shape_info(_best_audio_info(url))
 
-def fetch_info(url: str):
-    info = _best_audio_info(url)
-    return _shape_info(info)
-
-
-def search_youtube(query: str, limit: int = 5):
-    # yt-dlp supports the "ytsearchN:query" syntax
+def search_youtube(query: str, limit: int = 5) -> List[dict]:
     search_url = f"ytsearch{limit}:{query}"
     opts = {"quiet": True, "nocheckcertificate": True, "ignoreerrors": True}
     with yt_dlp.YoutubeDL(opts) as ydl:
@@ -75,16 +67,19 @@ def search_youtube(query: str, limit: int = 5):
     for e in entries:
         if not e:
             continue
+        thumb = e.get("thumbnail")
+        if not thumb and e.get("thumbnails"):
+            thumb = e["thumbnails"][-1].get("url")
         out.append({
             "id": e.get("id"),
             "title": e.get("title"),
             "duration": e.get("duration"),
             "webpage_url": e.get("webpage_url"),
-            "thumbnail": (e.get("thumbnail") or (e.get("thumbnails", [{}])[-1].get("url") if e.get("thumbnails") else None)),
+            "thumbnail": thumb,
         })
     return out
 
-# ---------- FastAPI app ----------
+# ---------------- FastAPI app ----------------
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 app.add_middleware(
@@ -94,7 +89,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 class InfoResponse(BaseModel):
     id: Optional[str]
@@ -108,7 +102,6 @@ class InfoResponse(BaseModel):
     view_count: Optional[int] = None
     live_status: Optional[str] = None
 
-
 @app.get("/")
 def root():
     return {
@@ -117,14 +110,12 @@ def root():
         "telegram_bot": bool(API_ID and API_HASH and BOT_TOKEN),
     }
 
-
 @app.get("/api/info", response_model=InfoResponse)
 async def api_info(url: str = Query(..., description="YouTube video URL")):
     try:
         return fetch_info(url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/search")
 async def api_search(q: str = Query(..., description="Search text"), limit: int = 5):
@@ -134,8 +125,7 @@ async def api_search(q: str = Query(..., description="Search text"), limit: int 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ---------- Telegram Bot (Pyrogram) ----------
+# ---------------- Telegram Bot (Pyrogram) ----------------
 
 tg_app: Optional[Client] = None
 if API_ID and API_HASH and BOT_TOKEN:
@@ -148,19 +138,20 @@ if API_ID and API_HASH and BOT_TOKEN:
         in_memory=True,
     )
 
+    async def _send_chunked_text(m, text: str, chunk=3500):
+        # Telegram text limit ~4096; keep margin
+        for i in range(0, len(text), chunk):
+            await m.reply_text(text[i:i+chunk])
+
     @tg_app.on_message(filters.command(["start", "help"]))
     async def _start(_, m):
         await m.reply_text(
-            """
-👋 **YouTube API Bot**
-
-Commands:
-• `/getapi <YouTube URL or search text>` — Direct audio link + info
-• `/search <query>` — Top 5 results
-• `/ping` — Check status
-
-HTTP API also available: `/api/info?url=...` `/api/search?q=...`
-"""
+            "👋 **YouTube API Bot**\n\n"
+            "Commands:\n"
+            "• `/getapi <YouTube URL or search text>` — Direct audio link + info\n"
+            "• `/search <query>` — Top 5 results\n"
+            "• `/ping` — Check status\n\n"
+            "HTTP API: `/api/info?url=...`  `/api/search?q=...`"
         )
 
     @tg_app.on_message(filters.command("ping"))
@@ -176,14 +167,13 @@ HTTP API also available: `/api/info?url=...` `/api/search?q=...`
         if not results:
             return await m.reply_text("No results found.")
         lines = [f"**{i+1}.** [{r['title']}]({r['webpage_url']})" for i, r in enumerate(results)]
-        await m.reply_text("\n".join(lines), disable_web_page_preview=False)
+        await _send_chunked_text(m, "\n".join(lines))
 
     @tg_app.on_message(filters.command("getapi"))
     async def _getapi(_, m):
         if len(m.command) < 2:
             return await m.reply_text("Usage: `/getapi <YouTube URL or search text>`")
         arg = " ".join(m.command[1:])
-        # If arg looks like URL, use it directly; otherwise perform search and pick top result
         is_url = bool(re.match(r"^https?://", arg))
         try:
             url = arg
@@ -193,7 +183,9 @@ HTTP API also available: `/api/info?url=...` `/api/search?q=...`
                     return await m.reply_text("No results found.")
                 url = results[0]["webpage_url"]
             data = fetch_info(url)
-            caption = (
+            # Keep caption very small; send details as text to avoid MEDIA_CAPTION_TOO_LONG
+            small_caption = "🎵 Stream info"
+            text = (
                 f"**Title:** {data.get('title')}\n"
                 f"**Duration:** {data.get('duration')} sec\n"
                 f"**Direct Link:** {data.get('direct_url')}\n"
@@ -201,19 +193,18 @@ HTTP API also available: `/api/info?url=...` `/api/search?q=...`
             )
             thumb = data.get("thumbnail")
             if thumb:
-                await m.reply_photo(thumb, caption=caption)
+                await m.reply_photo(thumb, caption=small_caption)
+                await _send_chunked_text(m, text)
             else:
-                await m.reply_text(caption)
+                await _send_chunked_text(m, text)
         except Exception as e:
             await m.reply_text(f"❌ Error: {e}")
 
-
+# FastAPI lifecycle hooks to manage bot
 @app.on_event("startup")
 async def on_startup():
-    # Start Telegram bot if configured
     if tg_app:
         await tg_app.start()
-
 
 @app.on_event("shutdown")
 async def on_shutdown():
@@ -222,7 +213,6 @@ async def on_shutdown():
             await tg_app.stop()
         except Exception:
             pass
-
 
 if __name__ == "__main__":
     import uvicorn
