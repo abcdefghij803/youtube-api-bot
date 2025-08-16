@@ -7,8 +7,8 @@ import config
 app = Client(
     "YouTubeAPI_Bot",
     bot_token=config.BOT_TOKEN,
-    api_id=12345,   # my.telegram.org se API_ID
-    api_hash="your_api_hash"
+    api_id=config.API_ID,   # my.telegram.org se API_ID
+    api_hash=config.API_HASH
 )
 
 # Command: Start
