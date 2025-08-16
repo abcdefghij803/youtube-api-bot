@@ -1,42 +1,48 @@
-# main.py
+import os
+import secrets
+from flask import Flask, request, jsonify
+from telegram.ext import Updater, CommandHandler
 
-from pyrogram import Client, filters
-from pyrogram.types import Message
-import config
+# Flask app
+app = Flask(__name__)
 
-app = Client(
-    "YouTubeAPI_Bot",
-    bot_token=config.BOT_TOKEN,
-    api_id=config.API_ID,   # my.telegram.org se API_ID
-    api_hash=config.API_HASH
-)
+# Generate API Key once (stable until restart / deployment)
+API_KEY = os.getenv("API_KEY") or secrets.token_hex(16)
 
-# Command: Start
-@app.on_message(filters.command("start"))
-async def start(client, message: Message):
-    await message.reply_text(
-        "👋 **Welcome to YouTube API Bot!**\n\n"
-        "👉 Sirf Owner `/getapi` se API le sakta hai.\n"
-        "🎵 Deploy karke Music Bot ke liye use karo!"
+@app.route("/api/stream", methods=["GET"])
+def stream():
+    key = request.args.get("key")
+    url = request.args.get("url")
+    if key != API_KEY:
+        return jsonify({"error": "Invalid API Key"}), 403
+    # Yaha yt-dlp se stream URL nikalne ka code hoga
+    return jsonify({"stream_url": f"processed:{url}"})
+
+
+# Telegram Bot part
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+def start(update, context):
+    update.message.reply_text("👋 Welcome! Use /getapi to receive your API details.")
+
+def getapi(update, context):
+    base_url = request.host_url.strip("/") if request else "https://your-northflank-domain.app"
+    update.message.reply_text(
+        f"✅ API Ready!\n\nBase URL: {base_url}/api\nAPI Key: {API_KEY}"
     )
 
-# Command: Get API (Owner-only)
-@app.on_message(filters.command("getapi"))
-async def getapi(client, message: Message):
-    if message.from_user.id != config.OWNER_ID:
-        return await message.reply_text("❌ You are not authorized to use this command!")
+def main():
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-    base_url = f"https://{message.from_user.username}.northflank.app/api"
-    api_key = config.API_SECRET
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("getapi", getapi))
 
-    text = (
-        "✅ **Your Self-Hosted API Details** ✅\n\n"
-        f"🌍 Base URL: `{base_url}`\n"
-        f"🔑 API Key: `{api_key}`\n\n"
-        "⚡ Paste this into your Music Bot repo to play unlimited music 🎶"
-    )
-
-    await message.reply_text(text)
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
-    app.run()
+    import threading
+    t = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080))))
+    t.start()
+    main()
