@@ -1,0 +1,8 @@
+# Required for Telegram bot features; HTTP API works even if these are unset.
+API_ID=123456
+API_HASH=your_api_hash
+BOT_TOKEN=123456:ABC-xyz_your_telegram_bot_token
+
+# Optional: server settings
+PORT=8080
+APP_NAME=YouTube API Bot
