@@ -1,18 +1,23 @@
+# ---- Base Image ----
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+# ---- Set working directory ----
+WORKDIR /app
 
-# OS deps: ffmpeg for yt-dlp; curl for health/debug
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl \
+# ---- Install system dependencies ----
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-COPY requirements.txt ./
+# ---- Copy project files ----
+COPY . /app
+
+# ---- Install Python dependencies ----
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
-
+# ---- Expose port ----
 EXPOSE 8080
+
+# ---- Start app ----
 CMD ["python", "main.py"]
